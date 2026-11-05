@@ -1,0 +1,29 @@
+logLevel: info
+
+rtsp: yes
+rtspAddress: :8554
+rtmp: yes
+rtmpAddress: :1935
+hls: yes
+hlsAddress: :8889
+
+authMethod: internal
+authInternalUsers:
+  - user: ${GGDM_INGEST_USER}
+    pass: ${GGDM_INGEST_PASSWORD}
+    ips: []
+    permissions:
+      - action: publish
+        path: ggdm-live
+  - user: relay-reader
+    pass: ${GGDM_INGEST_PASSWORD}
+    ips: []
+    permissions:
+      - action: read
+        path: ggdm-live
+
+paths:
+  ggdm-live:
+    source: publisher
+    overridePublisher: no
+    record: no
