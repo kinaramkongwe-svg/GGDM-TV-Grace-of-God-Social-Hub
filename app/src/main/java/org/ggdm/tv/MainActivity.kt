@@ -14,7 +14,8 @@ import androidx.core.content.ContextCompat
 import com.pedro.common.ConnectChecker
 import com.pedro.common.onMainThreadHandler
 import com.pedro.encoder.input.sources.video.Camera2Source
-import com.pedro.library.generic.GenericStream
+import com.pedro.library.multiple.MultiStream
+import com.pedro.library.multiple.MultiType
 import com.pedro.library.base.recording.RecordController
 import java.io.File
 import java.text.SimpleDateFormat
@@ -22,14 +23,17 @@ import java.util.Date
 import java.util.Locale
 
 class MainActivity : Activity(), ConnectChecker {
-    private lateinit var stream: GenericStream
+    private lateinit var stream: MultiStream
     private lateinit var preview: SurfaceView
     private lateinit var status: TextView
     private lateinit var stats: TextView
-    private lateinit var url: EditText
+    private lateinit var facebookUrl: EditText
+    private lateinit var youtubeUrl: EditText
     private lateinit var liveButton: Button
     private lateinit var recordButton: Button
     private var recordPath = ""
+    private var facebookStarted = false
+    private var youtubeStarted = false
     private val videoBitrate = 3000000
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -73,15 +77,15 @@ class MainActivity : Activity(), ConnectChecker {
         root.addView(frame, LinearLayout.LayoutParams(-1, 0, 1f))
         status = text("● READY — waiting for camera permission", 13f, Color.LTGRAY, true)
         root.addView(status)
-        stats = text("Landscape 1280×720 • 30 FPS target • 3 Mbps", 12f, Color.LTGRAY)
+        stats = text("One camera encode • two independent RTMP outputs • 720p / 30 FPS • 3 Mbps", 12f, Color.LTGRAY)
         root.addView(stats)
-        url = EditText(this).apply {
-            hint = "Paste full RTMP / RTMPS URL including stream key"
-            setHintTextColor(Color.GRAY); setTextColor(Color.WHITE); textSize = 13f
-            setSingleLine(true); setPadding(10, 4, 10, 4)
-            setBackgroundColor(Color.rgb(38,38,38))
-        }
-        root.addView(url)
+
+        facebookUrl = destinationField("Facebook RTMPS URL + stream key")
+        youtubeUrl = destinationField("YouTube RTMPS URL + stream key")
+        root.addView(text("BROADCAST DESTINATIONS", 12f, Color.rgb(212,175,55), true))
+        root.addView(facebookUrl)
+        root.addView(youtubeUrl)
+
         val title = EditText(this).apply {
             hint = "Programme title / lower-third text"
             setHintTextColor(Color.GRAY); setTextColor(Color.WHITE); setSingleLine(true)
@@ -96,19 +100,30 @@ class MainActivity : Activity(), ConnectChecker {
         root.addView(ticker)
         val row = LinearLayout(this).apply { gravity = Gravity.CENTER }
         liveButton = Button(this).apply {
-            text = "GO LIVE"
+            text = "GO LIVE TO BOTH"
             setOnClickListener {
                 if (!::stream.isInitialized) return@setOnClickListener
-                if (stream.isStreaming) {
-                    stream.stopStream()
-                    text = "GO LIVE"
+                if (facebookStarted || youtubeStarted) {
+                    stopDestinations()
                 } else {
-                    val destination = url.text.toString().trim()
-                    if (!(destination.startsWith("rtmp://") || destination.startsWith("rtmps://"))) {
-                        Toast.makeText(this@MainActivity, "Enter a valid RTMP or RTMPS destination", Toast.LENGTH_LONG).show()
+                    val fb = facebookUrl.text.toString().trim()
+                    val yt = youtubeUrl.text.toString().trim()
+                    val validFb = fb.startsWith("rtmp://") || fb.startsWith("rtmps://")
+                    val validYt = yt.startsWith("rtmp://") || yt.startsWith("rtmps://")
+                    if (!validFb || !validYt) {
+                        Toast.makeText(this@MainActivity, "Enter both valid Facebook and YouTube RTMP(S) destinations", Toast.LENGTH_LONG).show()
                     } else {
-                        stream.startStream(destination)
-                        text = "STOP LIVE"
+                        try {
+                            status.text = "● CONNECTING TO FACEBOOK + YOUTUBE…"
+                            stream.startStream(MultiType.RTMP, 0, fb)
+                            facebookStarted = true
+                            stream.startStream(MultiType.RTMP, 1, yt)
+                            youtubeStarted = true
+                            liveButton.text = "STOP BOTH"
+                        } catch (e: Exception) {
+                            stopDestinations()
+                            status.text = "● START FAILED: " + (e.message ?: "Check destinations")
+                        }
                     }
                 }
             }
@@ -122,7 +137,7 @@ class MainActivity : Activity(), ConnectChecker {
         row.addView(flip, LinearLayout.LayoutParams(0, -2, 1f))
         row.addView(recordButton, LinearLayout.LayoutParams(0, -2, 1f))
         root.addView(row)
-        root.addView(text("Direct RTMP broadcast is available. Direct Facebook / YouTube account publishing and graphic compositing require the next integration stage.", 11f, Color.LTGRAY))
+        root.addView(text("GGDM TV sends one encoded camera feed to two RTMP destinations directly from the phone. Account authorization and automatic destination loading are the next integration step.", 11f, Color.LTGRAY))
         setContentView(root)
         preview.holder.addCallback(object : SurfaceHolder.Callback {
             override fun surfaceCreated(holder: SurfaceHolder) {
@@ -137,18 +152,37 @@ class MainActivity : Activity(), ConnectChecker {
         })
     }
 
+    private fun destinationField(hintText: String) = EditText(this).apply {
+        hint = hintText
+        setHintTextColor(Color.GRAY)
+        setTextColor(Color.WHITE)
+        textSize = 13f
+        setSingleLine(true)
+        setPadding(10, 4, 10, 4)
+        setBackgroundColor(Color.rgb(38,38,38))
+    }
+
     private fun prepareCamera() {
         if (::stream.isInitialized) return
-        stream = GenericStream(this, this)
+        stream = MultiStream(this, arrayOf<ConnectChecker>(this, this), null, null, null)
         val videoReady = stream.prepareVideo(1280, 720, videoBitrate)
         val audioReady = stream.prepareAudio(32000, true, 128000)
         if (!videoReady || !audioReady) {
             status.text = "● CAMERA OR MICROPHONE PREPARATION FAILED"
             return
         }
-        stream.getStreamClient().setReTries(10)
         if (preview.holder.surface.isValid) stream.startPreview(preview)
         status.text = "● CAMERA READY — NOT LIVE"
+    }
+
+    private fun stopDestinations() {
+        if (!::stream.isInitialized) return
+        try { if (facebookStarted) stream.stopStream(MultiType.RTMP, 0) } catch (_: Exception) {}
+        try { if (youtubeStarted) stream.stopStream(MultiType.RTMP, 1) } catch (_: Exception) {}
+        facebookStarted = false
+        youtubeStarted = false
+        liveButton.text = "GO LIVE TO BOTH"
+        status.text = "● BROADCAST STOPPED"
     }
 
     private fun toggleRecord() {
@@ -177,17 +211,20 @@ class MainActivity : Activity(), ConnectChecker {
         else status.text = "● CAMERA AND MICROPHONE PERMISSIONS REQUIRED"
     }
 
-    override fun onConnectionStarted(url: String) { onMainThreadHandler { status.text = "● CONNECTING…" } }
-    override fun onConnectionSuccess() { onMainThreadHandler { status.text = "● LIVE — STREAM CONNECTED" } }
+    override fun onConnectionStarted(url: String) { onMainThreadHandler { status.text = "● CONNECTING — " + url.substringBefore("?") } }
+    override fun onConnectionSuccess() { onMainThreadHandler { status.text = "● OUTPUT CONNECTED — CHECK BOTH PLATFORM PREVIEWS" } }
     override fun onConnectionFailed(reason: String) {
-        onMainThreadHandler { status.text = "● CONNECTION FAILED: " + reason; liveButton.text = "GO LIVE" }
+        onMainThreadHandler { status.text = "● OUTPUT FAILED: " + reason }
     }
-    override fun onDisconnect() { onMainThreadHandler { status.text = "● DISCONNECTED"; liveButton.text = "GO LIVE" } }
-    override fun onAuthError() { onMainThreadHandler { status.text = "● STREAM AUTHENTICATION ERROR"; liveButton.text = "GO LIVE" } }
+    override fun onDisconnect() { onMainThreadHandler { status.text = "● AN OUTPUT DISCONNECTED" } }
+    override fun onAuthError() { onMainThreadHandler { status.text = "● STREAM AUTHENTICATION ERROR" } }
     override fun onAuthSuccess() { onMainThreadHandler { status.text = "● STREAM AUTHENTICATED" } }
 
     override fun onDestroy() {
-        if (::stream.isInitialized) stream.release()
+        if (::stream.isInitialized) {
+            stopDestinations()
+            stream.release()
+        }
         super.onDestroy()
     }
 }
