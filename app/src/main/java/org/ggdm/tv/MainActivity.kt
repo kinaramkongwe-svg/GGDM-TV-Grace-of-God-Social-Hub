@@ -12,8 +12,6 @@ import android.widget.*
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.pedro.common.ConnectChecker
-import com.pedro.common.StreamingStatsReport
-import com.pedro.common.Throughput
 import com.pedro.common.onMainThreadHandler
 import com.pedro.encoder.input.sources.video.Camera2Source
 import com.pedro.library.generic.GenericStream
@@ -187,14 +185,6 @@ class MainActivity : Activity(), ConnectChecker {
     override fun onDisconnect() { onMainThreadHandler { status.text = "● DISCONNECTED"; liveButton.text = "GO LIVE" } }
     override fun onAuthError() { onMainThreadHandler { status.text = "● STREAM AUTHENTICATION ERROR"; liveButton.text = "GO LIVE" } }
     override fun onAuthSuccess() { onMainThreadHandler { status.text = "● STREAM AUTHENTICATED" } }
-    override fun onStreamingStats(report: StreamingStatsReport) {
-        onMainThreadHandler {
-            if (report.throughput != Throughput.UNKNOWN) {
-                stats.text = "Upload " + (report.smoothedBitrate / 1000000f) + " Mbps • " +
-                    report.throughput.name + " • Queue " + (report.queueBytesOut / 1024) + " KB"
-            }
-        }
-    }
 
     override fun onDestroy() {
         if (::stream.isInitialized) stream.release()
