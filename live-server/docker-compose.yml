@@ -1,0 +1,34 @@
+services:
+  mediamtx:
+    image: bluenviron/mediamtx:1
+    container_name: ggdm-mediamtx
+    restart: unless-stopped
+    environment:
+      GGDM_INGEST_USER: ${GGDM_INGEST_USER:-ggdm-publisher}
+      GGDM_INGEST_PASSWORD: ${GGDM_INGEST_PASSWORD:?Set GGDM_INGEST_PASSWORD in .env}
+    ports:
+      - "1935:1935"
+      - "8554:8554"
+      - "8889:8889"
+    volumes:
+      - ./mediamtx.yml:/mediamtx.yml:ro
+    networks: [ggdm-live]
+
+  relay:
+    image: linuxserver/ffmpeg:latest
+    container_name: ggdm-multistream-relay
+    restart: unless-stopped
+    depends_on: [mediamtx]
+    environment:
+      GGDM_INGEST_USER: ${GGDM_INGEST_USER:-ggdm-publisher}
+      GGDM_INGEST_PASSWORD: ${GGDM_INGEST_PASSWORD:?Set GGDM_INGEST_PASSWORD in .env}
+      FACEBOOK_RTMP_URL: ${FACEBOOK_RTMP_URL:-}
+      YOUTUBE_RTMP_URL: ${YOUTUBE_RTMP_URL:-}
+    volumes:
+      - ./relay.sh:/relay.sh:ro
+    entrypoint: ["/bin/sh", "/relay.sh"]
+    networks: [ggdm-live]
+
+networks:
+  ggdm-live:
+    driver: bridge
