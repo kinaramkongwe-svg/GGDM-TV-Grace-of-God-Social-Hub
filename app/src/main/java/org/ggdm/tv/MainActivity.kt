@@ -22,7 +22,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-class MainActivity : Activity(), ConnectChecker {
+class MainActivity : Activity() {
     private lateinit var stream: MultiStream
     private lateinit var preview: SurfaceView
     private lateinit var status: TextView
@@ -49,8 +49,8 @@ class MainActivity : Activity(), ConnectChecker {
                     val yt = stream.getStreamClient(MultiType.RTMP, 1)
                     val fbBytes = fb.getBytesSend()
                     val ytBytes = yt.getBytesSend()
-                    val fbMbps = ((fbBytes - lastFacebookBytes).coerceAtLeast(0L) * 8L / 1000000L)
-                    val ytMbps = ((ytBytes - lastYoutubeBytes).coerceAtLeast(0L) * 8L / 1000000L)
+                    val fbKbps = ((fbBytes - lastFacebookBytes).coerceAtLeast(0L) * 8L / 1000L)
+                    val ytKbps = ((ytBytes - lastYoutubeBytes).coerceAtLeast(0L) * 8L / 1000L)
                     lastFacebookBytes = fbBytes
                     lastYoutubeBytes = ytBytes
                     val fbBusy = fb.hasCongestion()
@@ -73,8 +73,8 @@ class MainActivity : Activity(), ConnectChecker {
                         healthySamples = 0
                     }
                     val warning = if (congested) " • NETWORK CONGESTION — adaptive bitrate active" else " • LINK OK"
-                    stats.text = "FB: ${fb.getItemsInCache()} queued • ${fb.getDroppedVideoFrames()} dropped • ${fbMbps} Mb/s | " +
-                        "YT: ${yt.getItemsInCache()} queued • ${yt.getDroppedVideoFrames()} dropped • ${ytMbps} Mb/s | " +
+                    stats.text = "FB: ${fb.getItemsInCache()} queued • ${fb.getDroppedVideoFrames()} dropped • ${fbKbps} kb/s | " +
+                        "YT: ${yt.getItemsInCache()} queued • ${yt.getDroppedVideoFrames()} dropped • ${ytKbps} kb/s | " +
                         "Video target: ${currentVideoBitrate / 1000} kb/s${warning}"
                 } catch (e: Exception) {
                     stats.text = "Live diagnostics unavailable: ${e.message ?: "stream starting"}"
@@ -166,6 +166,14 @@ class MainActivity : Activity(), ConnectChecker {
                     } else {
                         try {
                             status.text = "● CONNECTING TO FACEBOOK + YOUTUBE…"
+                            currentVideoBitrate = videoBitrate
+                            stream.setVideoBitrateOnFly(videoBitrate)
+                            val facebookClient = stream.getStreamClient(MultiType.RTMP, 0)
+                            val youtubeClient = stream.getStreamClient(MultiType.RTMP, 1)
+                            facebookClient.setDelay(0)
+                            youtubeClient.setDelay(0)
+                            lastFacebookBytes = facebookClient.getBytesSend()
+                            lastYoutubeBytes = youtubeClient.getBytesSend()
                             stream.startStream(MultiType.RTMP, 0, fb)
                             facebookStarted = true
                             stream.startStream(MultiType.RTMP, 1, yt)
@@ -215,7 +223,7 @@ class MainActivity : Activity(), ConnectChecker {
 
     private fun prepareCamera() {
         if (::stream.isInitialized) return
-        stream = MultiStream(this, arrayOf<ConnectChecker>(this, this), null, null, null)
+        stream = MultiStream(this, arrayOf(outputChecker("FACEBOOK"), outputChecker("YOUTUBE")), null, null, null)
         currentVideoBitrate = videoBitrate
         val videoReady = stream.prepareVideo(1280, 720, videoBitrate, 30, 2)
         val audioReady = stream.prepareAudio(44100, true, 128000)
@@ -236,6 +244,7 @@ class MainActivity : Activity(), ConnectChecker {
         congestedSamples = 0
         healthySamples = 0
         currentVideoBitrate = videoBitrate
+        try { stream.setVideoBitrateOnFly(videoBitrate) } catch (_: Exception) {}
         liveButton.text = "GO LIVE TO BOTH"
         status.text = "● BROADCAST STOPPED"
     }
@@ -266,14 +275,26 @@ class MainActivity : Activity(), ConnectChecker {
         else status.text = "● CAMERA AND MICROPHONE PERMISSIONS REQUIRED"
     }
 
-    override fun onConnectionStarted(url: String) { onMainThreadHandler { status.text = "● CONNECTING — " + url.substringBefore("?") } }
-    override fun onConnectionSuccess() { onMainThreadHandler { status.text = "● OUTPUT CONNECTED — CHECK BOTH PLATFORM PREVIEWS" } }
-    override fun onConnectionFailed(reason: String) {
-        onMainThreadHandler { status.text = "● OUTPUT FAILED: " + reason }
+    private fun outputChecker(destination: String) = object : ConnectChecker {
+        override fun onConnectionStarted(url: String) {
+            onMainThreadHandler { status.text = "● $destination CONNECTING" }
+        }
+        override fun onConnectionSuccess() {
+            onMainThreadHandler { status.text = "● $destination CONNECTED" }
+        }
+        override fun onConnectionFailed(reason: String) {
+            onMainThreadHandler { status.text = "● $destination FAILED: $reason" }
+        }
+        override fun onDisconnect() {
+            onMainThreadHandler { status.text = "● $destination DISCONNECTED" }
+        }
+        override fun onAuthError() {
+            onMainThreadHandler { status.text = "● $destination AUTHENTICATION ERROR" }
+        }
+        override fun onAuthSuccess() {
+            onMainThreadHandler { status.text = "● $destination AUTHENTICATED" }
+        }
     }
-    override fun onDisconnect() { onMainThreadHandler { status.text = "● AN OUTPUT DISCONNECTED" } }
-    override fun onAuthError() { onMainThreadHandler { status.text = "● STREAM AUTHENTICATION ERROR" } }
-    override fun onAuthSuccess() { onMainThreadHandler { status.text = "● STREAM AUTHENTICATED" } }
 
     override fun onDestroy() {
         statsHandler.removeCallbacks(statsTicker)
