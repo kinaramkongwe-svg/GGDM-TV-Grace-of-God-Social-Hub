@@ -234,7 +234,7 @@ class MainActivity : Activity() {
         if (::stream.isInitialized) return
         stream = MultiStream(this, arrayOf(outputChecker("FACEBOOK"), outputChecker("YOUTUBE")), null, null, null)
         currentVideoBitrate = videoBitrate
-        val videoReady = stream.prepareVideo(1280, 720, videoBitrate, 30, 2)
+        val videoReady = stream.prepareVideo(1280, 720, videoBitrate, 30, 1) // 1-second keyframe interval for faster live decoder refresh; camera source/preview unchanged
         val audioReady = stream.prepareAudio(44100, true, 128000)
         if (!videoReady || !audioReady) {
             status.text = "● CAMERA OR MICROPHONE PREPARATION FAILED"
