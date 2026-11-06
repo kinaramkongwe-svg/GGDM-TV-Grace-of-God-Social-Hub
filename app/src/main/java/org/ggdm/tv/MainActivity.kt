@@ -27,6 +27,8 @@ class MainActivity : Activity() {
     private lateinit var preview: SurfaceView
     private lateinit var status: TextView
     private lateinit var stats: TextView
+    private lateinit var facebookStatus: TextView
+    private lateinit var youtubeStatus: TextView
     private lateinit var facebookUrl: EditText
     private lateinit var youtubeUrl: EditText
     private lateinit var liveButton: Button
@@ -130,6 +132,10 @@ class MainActivity : Activity() {
         root.addView(status)
         stats = text("Ready • 720p / 30 FPS • adaptive video bitrate up to 3 Mbps", 12f, Color.LTGRAY)
         root.addView(stats)
+        facebookStatus = text("● FACEBOOK: NOT CONNECTED", 12f, Color.LTGRAY, true)
+        youtubeStatus = text("● YOUTUBE: NOT CONNECTED", 12f, Color.LTGRAY, true)
+        root.addView(facebookStatus)
+        root.addView(youtubeStatus)
 
         facebookUrl = destinationField("Facebook RTMPS URL + stream key")
         youtubeUrl = destinationField("YouTube RTMPS URL + stream key")
@@ -166,6 +172,9 @@ class MainActivity : Activity() {
                     } else {
                         try {
                             status.text = "● CONNECTING TO FACEBOOK + YOUTUBE…"
+                            window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                            facebookStatus.text = "● FACEBOOK: CONNECTING…"
+                            youtubeStatus.text = "● YOUTUBE: CONNECTING…"
                             currentVideoBitrate = videoBitrate
                             stream.setVideoBitrateOnFly(videoBitrate)
                             val facebookClient = stream.getStreamClient(MultiType.RTMP, 0)
@@ -246,6 +255,9 @@ class MainActivity : Activity() {
         currentVideoBitrate = videoBitrate
         try { stream.setVideoBitrateOnFly(videoBitrate) } catch (_: Exception) {}
         liveButton.text = "GO LIVE TO BOTH"
+        window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        facebookStatus.text = "● FACEBOOK: STOPPED"
+        youtubeStatus.text = "● YOUTUBE: STOPPED"
         status.text = "● BROADCAST STOPPED"
     }
 
@@ -277,19 +289,34 @@ class MainActivity : Activity() {
 
     private fun outputChecker(destination: String) = object : ConnectChecker {
         override fun onConnectionStarted(url: String) {
-            onMainThreadHandler { status.text = "● $destination CONNECTING" }
+            onMainThreadHandler {
+                status.text = "● $destination CONNECTING"
+                if (destination == "FACEBOOK") facebookStatus.text = "● FACEBOOK: CONNECTING…" else youtubeStatus.text = "● YOUTUBE: CONNECTING…"
+            }
         }
         override fun onConnectionSuccess() {
-            onMainThreadHandler { status.text = "● $destination CONNECTED" }
+            onMainThreadHandler {
+                status.text = "● $destination CONNECTED"
+                if (destination == "FACEBOOK") facebookStatus.text = "● FACEBOOK: LIVE" else youtubeStatus.text = "● YOUTUBE: LIVE"
+            }
         }
         override fun onConnectionFailed(reason: String) {
-            onMainThreadHandler { status.text = "● $destination FAILED: $reason" }
+            onMainThreadHandler {
+                status.text = "● $destination FAILED: $reason"
+                if (destination == "FACEBOOK") facebookStatus.text = "● FACEBOOK: FAILED" else youtubeStatus.text = "● YOUTUBE: FAILED"
+            }
         }
         override fun onDisconnect() {
-            onMainThreadHandler { status.text = "● $destination DISCONNECTED" }
+            onMainThreadHandler {
+                status.text = "● $destination DISCONNECTED"
+                if (destination == "FACEBOOK") facebookStatus.text = "● FACEBOOK: DISCONNECTED" else youtubeStatus.text = "● YOUTUBE: DISCONNECTED"
+            }
         }
         override fun onAuthError() {
-            onMainThreadHandler { status.text = "● $destination AUTHENTICATION ERROR" }
+            onMainThreadHandler {
+                status.text = "● $destination AUTHENTICATION ERROR"
+                if (destination == "FACEBOOK") facebookStatus.text = "● FACEBOOK: AUTH ERROR" else youtubeStatus.text = "● YOUTUBE: AUTH ERROR"
+            }
         }
         override fun onAuthSuccess() {
             onMainThreadHandler { status.text = "● $destination AUTHENTICATED" }
