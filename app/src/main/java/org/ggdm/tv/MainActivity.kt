@@ -35,12 +35,63 @@ class MainActivity : Activity(), ConnectChecker {
     private var facebookStarted = false
     private var youtubeStarted = false
     private val videoBitrate = 3000000
+    private var currentVideoBitrate = videoBitrate
+    private var congestedSamples = 0
+    private var healthySamples = 0
+    private var lastFacebookBytes = 0L
+    private var lastYoutubeBytes = 0L
+    private val statsHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val statsTicker = object : Runnable {
+        override fun run() {
+            if (::stream.isInitialized && (facebookStarted || youtubeStarted)) {
+                try {
+                    val fb = stream.getStreamClient(MultiType.RTMP, 0)
+                    val yt = stream.getStreamClient(MultiType.RTMP, 1)
+                    val fbBytes = fb.getBytesSend()
+                    val ytBytes = yt.getBytesSend()
+                    val fbMbps = ((fbBytes - lastFacebookBytes).coerceAtLeast(0L) * 8L / 1000000L)
+                    val ytMbps = ((ytBytes - lastYoutubeBytes).coerceAtLeast(0L) * 8L / 1000000L)
+                    lastFacebookBytes = fbBytes
+                    lastYoutubeBytes = ytBytes
+                    val fbBusy = fb.hasCongestion()
+                    val ytBusy = yt.hasCongestion()
+                    val congested = fbBusy || ytBusy
+                    if (congested) {
+                        congestedSamples++
+                        healthySamples = 0
+                    } else {
+                        healthySamples++
+                        congestedSamples = 0
+                    }
+                    if (congestedSamples >= 3 && currentVideoBitrate > 1200000) {
+                        currentVideoBitrate = (currentVideoBitrate * 0.8).toInt().coerceAtLeast(1200000)
+                        stream.setVideoBitrateOnFly(currentVideoBitrate)
+                        congestedSamples = 0
+                    } else if (healthySamples >= 20 && currentVideoBitrate < videoBitrate) {
+                        currentVideoBitrate = (currentVideoBitrate * 1.1).toInt().coerceAtMost(videoBitrate)
+                        stream.setVideoBitrateOnFly(currentVideoBitrate)
+                        healthySamples = 0
+                    }
+                    val warning = if (congested) " • NETWORK CONGESTION — adaptive bitrate active" else " • LINK OK"
+                    stats.text = "FB: ${fb.getItemsInCache()} queued • ${fb.getDroppedVideoFrames()} dropped • ${fbMbps} Mb/s | " +
+                        "YT: ${yt.getItemsInCache()} queued • ${yt.getDroppedVideoFrames()} dropped • ${ytMbps} Mb/s | " +
+                        "Video target: ${currentVideoBitrate / 1000} kb/s${warning}"
+                } catch (e: Exception) {
+                    stats.text = "Live diagnostics unavailable: ${e.message ?: "stream starting"}"
+                }
+            } else {
+                stats.text = "Ready • 720p / 30 FPS • adaptive video bitrate up to 3 Mbps"
+            }
+            statsHandler.postDelayed(this, 1000)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.statusBarColor = Color.rgb(8, 8, 8)
         window.navigationBarColor = Color.rgb(8, 8, 8)
         makeStudio()
+        statsHandler.post(statsTicker)
         if (permissionsGranted()) prepareCamera()
         else ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO), 40)
     }
@@ -77,7 +128,7 @@ class MainActivity : Activity(), ConnectChecker {
         root.addView(frame, LinearLayout.LayoutParams(-1, 0, 1f))
         status = text("● READY — waiting for camera permission", 13f, Color.LTGRAY, true)
         root.addView(status)
-        stats = text("One camera encode • two independent RTMP outputs • 720p / 30 FPS • 3 Mbps", 12f, Color.LTGRAY)
+        stats = text("Ready • 720p / 30 FPS • adaptive video bitrate up to 3 Mbps", 12f, Color.LTGRAY)
         root.addView(stats)
 
         facebookUrl = destinationField("Facebook RTMPS URL + stream key")
@@ -165,8 +216,9 @@ class MainActivity : Activity(), ConnectChecker {
     private fun prepareCamera() {
         if (::stream.isInitialized) return
         stream = MultiStream(this, arrayOf<ConnectChecker>(this, this), null, null, null)
-        val videoReady = stream.prepareVideo(1280, 720, videoBitrate)
-        val audioReady = stream.prepareAudio(32000, true, 128000)
+        currentVideoBitrate = videoBitrate
+        val videoReady = stream.prepareVideo(1280, 720, videoBitrate, 30, 2)
+        val audioReady = stream.prepareAudio(44100, true, 128000)
         if (!videoReady || !audioReady) {
             status.text = "● CAMERA OR MICROPHONE PREPARATION FAILED"
             return
@@ -181,6 +233,9 @@ class MainActivity : Activity(), ConnectChecker {
         try { if (youtubeStarted) stream.stopStream(MultiType.RTMP, 1) } catch (_: Exception) {}
         facebookStarted = false
         youtubeStarted = false
+        congestedSamples = 0
+        healthySamples = 0
+        currentVideoBitrate = videoBitrate
         liveButton.text = "GO LIVE TO BOTH"
         status.text = "● BROADCAST STOPPED"
     }
@@ -221,6 +276,7 @@ class MainActivity : Activity(), ConnectChecker {
     override fun onAuthSuccess() { onMainThreadHandler { status.text = "● STREAM AUTHENTICATED" } }
 
     override fun onDestroy() {
+        statsHandler.removeCallbacks(statsTicker)
         if (::stream.isInitialized) {
             stopDestinations()
             stream.release()
